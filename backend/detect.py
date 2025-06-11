@@ -4,7 +4,7 @@ import torch
 import os
 
 # Load once
-model = YOLO("yolov11m.pt")
+model = YOLO("best.pt") 
 
 def run_detection(image_path):
     results = model.predict(image_path, conf=0.25, save=False)
