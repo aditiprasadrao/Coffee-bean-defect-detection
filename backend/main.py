@@ -1,33 +1,42 @@
+# backend/main.py
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from loguru import logger
-from detect import run_detection
-from loguru_config import logger
+from fastapi.responses import JSONResponse
+from ultralytics import YOLO
 import shutil
+from loguru import logger
 import os
+import uuid
 
 app = FastAPI()
 
-# Allow CORS for frontend
+# Allow frontend to call backend (adjust origin in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Use actual domain in production
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Load your model
+model = YOLO("best.pt")
 
-@app.post("/upload/")
-async def upload_image(file: UploadFile = File(...)):
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_location, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+@app.post("/predict")
+async def predict(file: UploadFile = File(...)):
+    temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
+    with open(temp_filename, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-    logger.info(f"Received image: {file.filename}")
-
-    result = run_detection(file_location)
-    logger.info(f"Detection result: {result}")
-
-    return {"filename": file.filename, "result": result}
+    results = model.predict(temp_filename, conf=0.25)
+    
+    class_counts = {}
+    for result in results:
+        for box in result.boxes:
+            cls = int(box.cls[0])
+            name = model.names[cls]
+            class_counts[name] = class_counts.get(name, 0) + 1
+    
+    os.remove(temp_filename)
+    logger.info(f"Predicted classes: {class_counts}")
+    return JSONResponse(content={"counts": class_counts})
