@@ -1,60 +1,83 @@
-import React, { useState } from 'react'
-import axios from 'axios'
+import React, { useState } from 'react';
+import axios from 'axios';
+import DragDropUpload from "./DragAndDropUpload";
+
 
 function ImageUploader() {
-  const [file, setFile] = useState(null)
-  const [result, setResult] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const handleFileSelect = (selectedFile) => {
+    setFile(selectedFile);
+    setPreview(URL.createObjectURL(selectedFile));
+    setResult(null); // Reset previous result if new file is selected
+  };
 
   const handleUpload = async () => {
-    if (!file) return
-    const formData = new FormData()
-    formData.append('file', file)
-    setLoading(true)
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setLoading(true);
 
     try {
-      const response = await axios.post('http://127.0.0.1:8000/upload/', formData)
-      setResult(response.data)
-    } catch (err) {
-      console.error(err)
+      const response = await axios.post('http://127.0.0.1:8000/predict', formData);
+      setResult(response.data);
+    } catch (error) {
+      console.error('Upload error:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false)
-  }
+  };
 
   return (
-    <div>
-      <input
-        type="file"
-        accept="image/*"
-        className="block w-full text-sm text-gray-700 mb-4"
-        onChange={(e) => setFile(e.target.files[0])}
-      />
+    <div className="space-y-6">
+      {/* Drag & Drop Section */}
+      <section>
+        <DragDropUpload onFileSelect={handleFileSelect} />
+      </section>
+
+      {/* Preview */}
+      {preview && (
+        <img
+          src={preview}
+          alt="Preview"
+          className="w-full max-h-60 object-contain border rounded transition-transform duration-300 hover:scale-105"
+        />
+      )}
+
+      {/* Upload Button */}
       <button
-        className="bg-amber-500 text-white px-4 py-2 rounded hover:bg-amber-600"
+        className={`w-full bg-amber-600 text-white text-lg px-6 py-3 rounded-lg transition-transform duration-300 ${
+          file ? 'hover:bg-amber-700 hover:scale-105' : 'opacity-50 cursor-not-allowed'
+        }`}
         onClick={handleUpload}
+        disabled={!file || loading}
       >
-        Analyze
+        {loading ? 'Analyzing...' : 'Analyze Image'}
       </button>
 
-      {loading && <p className="mt-4 text-sm text-gray-600">Processing...</p>}
-
+      {/* Result */}
       {result && (
-        <div className="mt-6 text-left">
-          <h3 className="text-lg font-semibold">Prediction:</h3>
-          <ul className="mt-2 text-sm text-gray-800">
-            {Object.entries(result.class_counts).map(([cls, count]) => (
-              <li key={cls}>{cls}: {count}</li>
+        <div className="mt-6 text-left w-full">
+          <h3 className="text-lg font-semibold text-amber-800 mb-2">Prediction:</h3>
+          <ul className="text-sm text-gray-800 list-disc list-inside">
+            {Object.entries(result.counts).map(([cls, count]) => (
+              <li key={cls}>
+                <strong>{cls}</strong>: {count}
+              </li>
             ))}
           </ul>
           <img
             src={`http://127.0.0.1:8000/${result.annotated_image_path}`}
             alt="Prediction"
-            className="mt-4 w-full border rounded"
+            className="mt-4 w-full border rounded transition-transform duration-300 hover:scale-105"
           />
         </div>
       )}
     </div>
-  )
+  );
 }
 
-export default ImageUploader
+export default ImageUploader;
