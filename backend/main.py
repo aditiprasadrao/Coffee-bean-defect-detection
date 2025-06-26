@@ -6,44 +6,79 @@ from ultralytics import YOLO
 from loguru import logger
 import shutil
 import os
-import uuid
+import json
 
 app = FastAPI()
 
-# Mount the uploads directory to serve static files
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Folders
+BEFORE_DIR = "before"
+AFTER_DIR = "after"
+COUNTER_FILE = "counter.txt"
 
-# Enable CORS
+# Create required directories
+os.makedirs(BEFORE_DIR, exist_ok=True)
+os.makedirs(AFTER_DIR, exist_ok=True)
+
+# Mount folders to serve static files via HTTP
+app.mount("/before", StaticFiles(directory=BEFORE_DIR), name="before")
+app.mount("/after", StaticFiles(directory=AFTER_DIR), name="after")
+
+# CORS config
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with your frontend domain in production
+    allow_origins=["*"],  # Change to specific origin in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load the model
+# Load YOLO model
 model = YOLO("best.pt")
+
+# Helper: get next available index
+def get_next_index():
+    if not os.path.exists(COUNTER_FILE):
+        with open(COUNTER_FILE, "w") as f:
+            f.write("1")
+        return 1
+    with open(COUNTER_FILE, "r") as f:
+        index = int(f.read())
+    with open(COUNTER_FILE, "w") as f:
+        f.write(str(index + 1))
+    return index
+
+# Helper: format file names
+def format_id(prefix, index):
+    return f"{prefix}{index:05d}"
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    # Generate unique filename
-    unique_id = uuid.uuid4().hex
-    original_filename = file.filename
-    temp_filename = f"temp_{unique_id}.jpg"
-    upload_path = f"uploads/predicted_{unique_id}.jpg"
+    index = get_next_index()
 
-    # Save uploaded file temporarily
-    with open(temp_filename, "wb") as buffer:
+    # Filenames
+    b_name = format_id("b", index) + ".jpg"
+    a_folder = format_id("a", index)
+    a_img = a_folder + ".jpg"
+    j_name = format_id("j", index) + ".json"
+
+    # Paths
+    before_path = os.path.join(BEFORE_DIR, b_name)
+    after_subdir = os.path.join(AFTER_DIR, a_folder)
+    os.makedirs(after_subdir, exist_ok=True)
+    annotated_path = os.path.join(after_subdir, a_img)
+    json_path = os.path.join(after_subdir, j_name)
+
+    # Save original uploaded image
+    with open(before_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Run inference
-    results = model.predict(temp_filename, conf=0.25, save=True, save_txt=False)
+    # Run YOLO prediction
+    results = model.predict(before_path, conf=0.25, save=True, save_txt=False)
 
-    # Save annotated image to uploads folder
+    # Move predicted image to appropriate subfolder
     if results and results[0].save_dir:
-        saved_image_path = os.path.join(results[0].save_dir, os.path.basename(temp_filename))
-        shutil.move(saved_image_path, upload_path)
+        temp_annotated = os.path.join(results[0].save_dir, os.path.basename(before_path))
+        shutil.move(temp_annotated, annotated_path)
 
     # Count predictions
     class_counts = {}
@@ -53,12 +88,15 @@ async def predict(file: UploadFile = File(...)):
             name = model.names[cls]
             class_counts[name] = class_counts.get(name, 0) + 1
 
-    # Clean up temp
-    os.remove(temp_filename)
+    # Save result as JSON
+    with open(json_path, "w") as f:
+        json.dump(class_counts, f)
 
-    logger.info(f"Predicted classes: {class_counts}")
+    logger.info(f"Saved input to {before_path}, output to {annotated_path}, json to {json_path}")
 
     return JSONResponse(content={
-        "counts": class_counts,
-        "annotated_image_path": f"/uploads/predicted_{unique_id}.jpg"
+        "input_image": f"/before/{b_name}",
+        "annotated_image": f"/after/{a_folder}/{a_img}",
+        "result_json": f"/after/{a_folder}/{j_name}",
+        "counts": class_counts
     })
