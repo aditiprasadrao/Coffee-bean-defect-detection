@@ -100,3 +100,7 @@ async def predict(file: UploadFile = File(...)):
         "result_json": f"/after/{a_folder}/{j_name}",
         "counts": class_counts
     })
+
+if __name__=='__main__':
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
